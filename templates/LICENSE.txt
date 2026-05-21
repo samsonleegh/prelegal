@@ -1,0 +1,15 @@
+All legal-agreement templates in this directory were sourced from the
+Common Paper GitHub organization (https://github.com/CommonPaper) and are
+released by Common Paper under the Creative Commons Attribution 4.0
+International license (CC BY 4.0).
+
+License summary: you are free to share and adapt these templates for any
+purpose, including commercially, provided that you give appropriate
+credit to Common Paper, indicate if changes were made, and do not imply
+endorsement.
+
+License text: https://creativecommons.org/licenses/by/4.0/legalcode
+License summary: https://creativecommons.org/licenses/by/4.0/
+
+Attribution: "Based on Common Paper standard agreements
+(https://github.com/CommonPaper), licensed under CC BY 4.0."
