@@ -104,6 +104,9 @@ node_modules/
 out/
 next-env.d.ts
 
+# Backend bundled static frontend (built artifact only)
+backend/static/
+
 # Build outputs
 build/
 dist/

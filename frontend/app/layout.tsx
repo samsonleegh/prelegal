@@ -8,9 +8,9 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Mutual NDA Creator | Prelegal",
+  title: "Prelegal",
   description:
-    "Fill in a short form and download a Mutual Non-Disclosure Agreement based on the Common Paper standard template.",
+    "Draft common legal agreements from standardised templates.",
 };
 
 export default function RootLayout({
