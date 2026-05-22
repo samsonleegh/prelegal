@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (getStoredUser()) router.replace("/mnda");
+    if (getStoredUser()) router.replace("/draft");
   }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -23,7 +23,7 @@ export default function LoginPage() {
     try {
       const user = await fakeLogin(name.trim(), email.trim());
       storeUser(user);
-      router.replace("/mnda");
+      router.replace("/draft");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
       setSubmitting(false);
