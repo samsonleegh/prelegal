@@ -2,28 +2,31 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { sendChat, type ChatMessage } from "@/lib/chat";
-import { makeDefaultInput, todayIso } from "@/lib/defaults";
-import { mergePatch } from "@/lib/mergePatch";
-import type { MndaInput } from "@/lib/types";
+import {
+  mergePatch,
+  sendChat,
+  type ChatMessage,
+  type DraftState,
+} from "@/lib/draft";
 
 interface Props {
-  value: MndaInput;
-  onChange: (next: MndaInput) => void;
+  state: DraftState;
+  onChange: (next: DraftState) => void;
 }
 
 const GREETING: ChatMessage = {
   role: "assistant",
   content:
-    "Hi! I'll help you draft a Mutual NDA. To start, what are the names of the two companies entering into this agreement?",
+    "Hi! I can help you draft a legal agreement. Which type of document would you like to create?",
 };
 
-export function MndaChat({ value, onChange }: Props) {
+export function DraftChat({ state, onChange }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([GREETING]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -42,13 +45,15 @@ export function MndaChat({ value, onChange }: Props) {
 
     try {
       // Strip the hardcoded UI greeting; the LLM only sees real exchanges.
-      const turn = await sendChat(next.slice(1), value);
+      const turn = await sendChat(next.slice(1), state);
       setMessages((prev) => [...prev, { role: "assistant", content: turn.reply }]);
-      onChange(mergePatch(value, turn.patch));
+      onChange(mergePatch(state, turn.patch));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setPending(false);
+      // Return focus to the textarea so the user can keep typing.
+      inputRef.current?.focus();
     }
   }
 
@@ -56,7 +61,8 @@ export function MndaChat({ value, onChange }: Props) {
     setMessages([GREETING]);
     setDraft("");
     setError(null);
-    onChange({ ...makeDefaultInput(), effectiveDate: todayIso() });
+    onChange({ templateKey: null, values: {} });
+    inputRef.current?.focus();
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -103,6 +109,7 @@ export function MndaChat({ value, onChange }: Props) {
       <div className="border-t border-slate-200 p-3">
         <div className="flex gap-2">
           <textarea
+            ref={inputRef}
             className="form-input min-h-12 flex-1 resize-none"
             placeholder="Type your message…"
             value={draft}
@@ -110,6 +117,7 @@ export function MndaChat({ value, onChange }: Props) {
             onKeyDown={handleKey}
             disabled={pending}
             rows={2}
+            autoFocus
           />
           <button
             type="button"
@@ -134,9 +142,7 @@ function MessageBubble({ role, content }: ChatMessage) {
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
-          isUser
-            ? "bg-[#209dd7] text-white"
-            : "bg-slate-100 text-slate-800"
+          isUser ? "bg-[#209dd7] text-white" : "bg-slate-100 text-slate-800"
         }`}
       >
         {content}

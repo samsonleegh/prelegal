@@ -1,76 +1,135 @@
-"""Cerebras-routed LLM call for the MNDA chat."""
+"""Cerebras-routed LLM call for the document drafting chat."""
 
 import json
 
 from litellm import completion
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app.mnda_models import MndaInput, MndaInputPatch
+from app.templates import TEMPLATES, TemplateSpec
 
 MODEL = "openrouter/openai/gpt-oss-120b"
 EXTRA_BODY = {"provider": {"order": ["cerebras"]}}
 
 
+class DraftPatch(BaseModel):
+    template_key: str | None = Field(
+        default=None,
+        description=(
+            "Set on the turn where the user picks (or confirms) which document to draft. "
+            "Must be one of the keys from the catalog. Leave null on later turns."
+        ),
+    )
+    # The model occasionally emits `null` for unknown values, so accept
+    # `str | None` here and filter nulls out in run_chat_turn.
+    values: dict[str, str | None] = Field(
+        default_factory=dict,
+        description=(
+            "Variables learned this turn for the selected template. "
+            "Keys must match the template's variable list verbatim. "
+            "Only include variables you learned this turn; never echo existing values."
+        ),
+    )
+
+
 class ChatTurn(BaseModel):
-    """The LLM's structured output for one assistant turn."""
+    # `reply` is sometimes omitted by gpt-oss-120b under structured outputs;
+    # default to empty and substitute a fallback in run_chat_turn.
+    reply: str = ""
+    patch: DraftPatch = Field(default_factory=DraftPatch)
 
-    reply: str
-    patch: MndaInputPatch
+
+def _catalog_summary() -> str:
+    return "\n".join(
+        f"- `{t.key}` — {t.name}: {t.description}" for t in TEMPLATES.values()
+    )
 
 
-SYSTEM_PROMPT = """You are a legal drafting assistant helping a user complete a Common Paper Mutual Non-Disclosure Agreement (MNDA). Your job is to gather the information needed to fill in the document by chatting with the user, then return any new values you learned this turn as a structured patch.
+_SELECTION_SYSTEM_PROMPT = f"""You are a legal drafting assistant for a SaaS that drafts agreements based on Common Paper templates.
 
-Fields to populate (all live in the MndaInput object the user is editing):
+Your job in this stage is to figure out WHICH document the user wants to draft and set `patch.template_key` to the matching catalog key. The catalog of supported templates:
 
-- purpose: free-text description of why the parties are sharing confidential information (e.g. "Evaluating a potential commercial partnership").
-- effectiveDate: ISO date string "YYYY-MM-DD".
-- mndaTerm: how long the MNDA is in effect. Either {"kind": "years", "years": N} where 1 <= N <= 99, or {"kind": "perpetual"} meaning it continues until terminated.
-- confidentialityTerm: how long confidential information stays protected. Same shape as mndaTerm. "perpetual" means in perpetuity.
-- governingLaw: U.S. state whose laws govern, e.g. "Delaware".
-- jurisdiction: city/county and state where disputes are heard, e.g. "New Castle, Delaware".
-- party1, party2: each has {company, printName, title, noticeAddress}. noticeAddress is an email or postal address.
+{_catalog_summary()}
 
-Behavior rules:
+Rules:
 
-1. Ask one focused question at a time. Group naturally related fields (e.g. ask for a party's company + signatory name + title + notice address together).
-2. The user has already been greeted by the UI; do not re-introduce yourself. Jump straight into gathering missing information, starting with whichever required field is still empty.
-3. Reply in a warm, concise tone. Confirm what you captured before moving on.
-4. In every reply, populate the `patch` with ONLY the fields you learned from the user this turn. Leave fields you did not learn as null. Do not echo existing values back into the patch.
-5. If the user gives a value but it's ambiguous (e.g. just a state for "Delaware" when you need governing law and jurisdiction), capture what you can and ask a clarifying question for the rest.
-6. When all fields have plausible values, tell the user the draft is ready and they can review and download it from the panel on the right.
-7. Never invent values the user did not provide. If they say "use sensible defaults", you may suggest values but ask them to confirm before placing them in the patch.
+1. If the user's request maps to one of the catalog entries, set `patch.template_key` to that key and acknowledge what you're drafting in your reply.
+2. If the user's request is for a document NOT in the catalog (e.g. an employment contract, will, lease), do NOT pick a key. Instead, apologise that you can't draft that, and offer the closest supported alternative from the catalog as a suggestion. Wait for the user to confirm before setting `template_key`.
+3. If the user's request is vague (e.g. "I need an agreement"), ask a clarifying question.
+4. Never set `patch.values` at this stage — variables come after the user has selected a document.
+5. Reply in a warm, concise tone. Your reply MUST end with a question (either a clarifying question or asking the user to confirm a suggested template).
+6. The `reply` field is REQUIRED — never leave it empty. Always include a natural-language message even when you set `patch.template_key`. After picking a template, your reply should confirm the choice and ask the first question to begin filling in variables.
+"""
 
-The current state of the user's MndaInput will be provided in the next message as JSON; use it to know which fields still need values.
+
+def _filling_system_prompt(spec: TemplateSpec) -> str:
+    variables_block = "\n".join(f"- {v}" for v in spec.variables)
+    return f"""You are a legal drafting assistant helping the user complete a Common Paper {spec.name}.
+
+The document has the following cover-page variables (each is referenced inline in the template body):
+
+{variables_block}
+
+Rules:
+
+1. Read the user's latest message and copy any variable values you find into `patch.values`. Keys MUST match the variable list above exactly. Only include variables the user explicitly mentioned this turn — never invent values, and never write "N/A" or other placeholders for variables the user did not address.
+2. Write a `reply`: a natural-language message that confirms what you captured (if anything) and asks ONE focused follow-up question about the next variable that still needs a value. The reply must never be empty.
+3. Once every variable has a value, tell the user the draft is ready and they can download it from the right-hand panel.
+4. Never set `patch.template_key`; the document is already chosen.
+
+The current state of the user's filled-in variables will be provided in the next message as JSON. Use it to know which variables still need values.
 """
 
 
 def run_chat_turn(
     messages: list[dict[str, str]],
-    current_input: MndaInput,
+    current_template_key: str | None,
+    current_values: dict[str, str],
 ) -> ChatTurn:
-    """Run one chat turn. `messages` is the conversation so far (user/assistant only).
+    if current_template_key and current_template_key in TEMPLATES:
+        system_prompt = _filling_system_prompt(TEMPLATES[current_template_key])
+        state = {
+            "template_key": current_template_key,
+            "values": current_values,
+        }
+    else:
+        system_prompt = _SELECTION_SYSTEM_PROMPT
+        state = {"template_key": None}
 
-    Returns the parsed ChatTurn (reply + patch).
-    """
-    state_message = {
-        "role": "system",
-        "content": f"Current MndaInput state (JSON):\n{current_input.model_dump_json()}",
-    }
-    full_messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        state_message,
+    full_messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "system",
+            "content": f"Current state (JSON):\n{json.dumps(state)}",
+        },
         *messages,
     ]
 
-    response = completion(
-        model=MODEL,
-        messages=full_messages,
-        response_format=ChatTurn,
-        reasoning_effort="low",
-        extra_body=EXTRA_BODY,
-    )
-    content = response.choices[0].message.content
+    # gpt-oss-120b occasionally returns null content under structured outputs;
+    # retry once before giving up.
+    content: str | None = None
+    for _ in range(2):
+        response = completion(
+            model=MODEL,
+            messages=full_messages,
+            response_format=ChatTurn,
+            reasoning_effort="low",
+            extra_body=EXTRA_BODY,
+        )
+        content = response.choices[0].message.content
+        if content:
+            break
+    if not content:
+        raise RuntimeError("LLM returned empty content")
+
     # gpt-oss-120b occasionally appends prose after the JSON object;
     # raw_decode reads the first complete JSON value and ignores the rest.
     obj, _ = json.JSONDecoder().raw_decode(content.lstrip())
-    return ChatTurn.model_validate(obj)
+    turn = ChatTurn.model_validate(obj)
+
+    # Filter out null values the model occasionally emits inside `values`.
+    turn.patch.values = {
+        k: v for k, v in turn.patch.values.items() if v is not None and v != ""
+    }
+    if not turn.reply.strip():
+        turn.reply = "Got it. What would you like to add next?"
+    return turn

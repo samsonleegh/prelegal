@@ -1,18 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 
-import { MndaChat } from "@/components/MndaChat";
-import { MndaPreview } from "@/components/MndaPreview";
-import { makeDefaultInput, todayIso } from "@/lib/defaults";
+import { DraftChat } from "@/components/DraftChat";
+import { DraftPreview } from "@/components/DraftPreview";
 import { clearStoredUser, getStoredUser, type User } from "@/lib/auth";
+import {
+  fetchTemplates,
+  type DraftState,
+  type TemplateSpec,
+} from "@/lib/draft";
 
-const MndaDownloadButton = dynamic(
+const DraftDownloadButton = dynamic(
   () =>
-    import("@/components/MndaDownloadButton").then((m) => ({
-      default: m.MndaDownloadButton,
+    import("@/components/DraftDownloadButton").then((m) => ({
+      default: m.DraftDownloadButton,
     })),
   {
     ssr: false,
@@ -24,10 +28,14 @@ const MndaDownloadButton = dynamic(
   },
 );
 
-export default function MndaPage() {
+export default function DraftPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [input, setInput] = useState(() => makeDefaultInput());
+  const [templates, setTemplates] = useState<TemplateSpec[] | null>(null);
+  const [state, setState] = useState<DraftState>({
+    templateKey: null,
+    values: {},
+  });
 
   useEffect(() => {
     const stored = getStoredUser();
@@ -36,10 +44,15 @@ export default function MndaPage() {
       return;
     }
     setUser(stored);
-    setInput((prev) =>
-      prev.effectiveDate === "" ? { ...prev, effectiveDate: todayIso() } : prev,
-    );
+    fetchTemplates()
+      .then(setTemplates)
+      .catch(() => setTemplates([]));
   }, [router]);
+
+  const selected = useMemo<TemplateSpec | null>(() => {
+    if (!templates || !state.templateKey) return null;
+    return templates.find((t) => t.key === state.templateKey) ?? null;
+  }, [templates, state.templateKey]);
 
   function handleSignOut() {
     clearStoredUser();
@@ -52,9 +65,9 @@ export default function MndaPage() {
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-6 lg:p-10">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-[#032147]">Mutual NDA Creator</h1>
+          <h1 className="text-2xl font-semibold text-[#032147]">Draft an Agreement</h1>
           <p className="text-sm text-slate-600">
-            Chat with the AI on the left to draft your Mutual NDA. Review the document on the right, then download a PDF.
+            Chat with the AI on the left to draft a document. Review the live preview on the right, then download a PDF.
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -68,21 +81,21 @@ export default function MndaPage() {
               Sign out
             </button>
           </div>
-          <MndaDownloadButton input={input} />
+          <DraftDownloadButton template={selected} values={state.values} />
         </div>
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <section aria-label="Chat">
-          <MndaChat value={input} onChange={setInput} />
+          <DraftChat state={state} onChange={setState} />
         </section>
         <section aria-label="Preview" className="lg:sticky lg:top-6 lg:self-start">
-          <MndaPreview input={input} />
+          <DraftPreview template={selected} values={state.values} />
         </section>
       </div>
 
       <footer className="pt-6 text-center text-xs text-slate-500">
-        Based on the Common Paper Mutual NDA (Version 1.0), released under CC BY 4.0.
+        Documents based on Common Paper templates, released under CC BY 4.0.
       </footer>
     </main>
   );

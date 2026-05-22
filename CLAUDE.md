@@ -56,16 +56,20 @@ Backend available at http://localhost:8000
 
 ## Current state
 
-Implemented through PL-4:
+Implemented through PL-6:
 
 - **Templates dataset** (PL-2): 12 Common Paper templates under `templates/`, indexed by `catalog.json`.
-- **MNDA creator** (PL-3): client-side form → live preview → PDF download (`@react-pdf/renderer`). Lives at `/mnda`. Code under `frontend/app/mnda/` and `frontend/components/Mnda*`.
 - **V1 foundation** (PL-4):
   - `backend/` — FastAPI + uv project. SQLite `users` table recreated on every container start. `POST /api/auth/fake-login` upserts a user by email.
   - `frontend/` — Next.js 16 static export served by FastAPI from `backend/static/` (built into the image during `docker build`).
-  - `/` is a placeholder sign-in (name + email → fake-login → `localStorage`); `/mnda` is gated on the stored user.
-  - `Dockerfile` + `docker-compose.yml` package everything into one container on :8000.
+  - `/` is a placeholder sign-in (name + email → fake-login → `localStorage`); the drafting page is gated on the stored user.
+  - `Dockerfile` + `docker-compose.yml` package everything into one container on :8000. `docker-compose.yml` reads `OPENROUTER_API_KEY` from `.env` via `env_file`.
   - `scripts/{start,stop}-{mac,linux}.sh` and `scripts/{start,stop}-windows.ps1` wrap `docker compose up --build` / `down`.
-  - Backend tests: `cd backend && uv run pytest` (5 cases, covers `/api/health` and the fake-login flow).
+- **Generic document drafter** (PL-3 prototype → PL-5 AI chat → PL-6 generalized to all templates): lives at `/draft`.
+  - `backend/app/templates.py` loads `catalog.json` + each template's markdown at import time, extracts the inline cover-page variables from `<span class="(coverpage_link|keyterms_link|orderform_link)">VAR</span>` markers, and dedupes possessive forms.
+  - `GET /api/templates` returns the catalog (name, description, variable list, full markdown content) for the frontend to render previews.
+  - `POST /api/draft/chat` calls `openrouter/openai/gpt-oss-120b` via Cerebras (LiteLLM) with structured outputs returning `{reply, patch: {template_key?, values?}}`. Two-stage system prompt: first identifies which catalog template the user wants (or politely offers the closest match if the request is outside the catalog), then asks one focused question at a time to fill the variables. Code in `backend/app/llm.py`.
+  - Frontend: `app/draft/page.tsx` owns the `DraftState = {templateKey, values}`. `DraftChat` is the chat panel (refocuses the textarea after every send). `DraftPreview` + `DraftPdfDocument` share `lib/templateRender.ts`, which parses the markdown into block + span trees and substitutes variable values inline. `DraftDownloadButton` produces a PDF via `@react-pdf/renderer`.
+- Backend tests: `cd backend && uv run pytest` (15 cases — health, fake-login, template loading, and the draft chat route with a mocked LLM).
 
-Not yet implemented: AI chat for filling fields, real authentication, document persistence, and every document type other than MNDA.
+Not yet implemented: real authentication, document/chat persistence, and bespoke per-template UX (e.g. structured term-length pickers).
