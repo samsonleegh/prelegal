@@ -2,6 +2,8 @@ services:
   prelegal:
     build: .
     container_name: prelegal
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     restart: unless-stopped
