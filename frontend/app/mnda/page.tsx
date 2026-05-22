@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 
-import { MndaForm } from "@/components/MndaForm";
+import { MndaChat } from "@/components/MndaChat";
 import { MndaPreview } from "@/components/MndaPreview";
 import { makeDefaultInput, todayIso } from "@/lib/defaults";
 import { clearStoredUser, getStoredUser, type User } from "@/lib/auth";
@@ -54,7 +54,7 @@ export default function MndaPage() {
         <div>
           <h1 className="text-2xl font-semibold text-[#032147]">Mutual NDA Creator</h1>
           <p className="text-sm text-slate-600">
-            Fill out the fields on the left, review the document on the right, then download a PDF.
+            Chat with the AI on the left to draft your Mutual NDA. Review the document on the right, then download a PDF.
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -73,8 +73,8 @@ export default function MndaPage() {
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-        <section aria-label="Form">
-          <MndaForm value={input} onChange={setInput} />
+        <section aria-label="Chat">
+          <MndaChat value={input} onChange={setInput} />
         </section>
         <section aria-label="Preview" className="lg:sticky lg:top-6 lg:self-start">
           <MndaPreview input={input} />
